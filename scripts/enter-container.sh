@@ -6,7 +6,7 @@ set -e
 # =========================================================
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE="ghcr.io/gem5/ubuntu-24.04_all-dependencies:v26-0"
+IMAGE="proyecto-gem5"
 
 # Detectar la carpeta del usuario incluso si se ejecuta con sudo.
 if [[ -n "${GEM5_DIR:-}" ]]; then
