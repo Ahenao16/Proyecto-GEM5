@@ -1,4 +1,10 @@
-
 m5out/
 dist/
 *.swp
+
+# Ignorar todo dentro de results
+results/*
+
+# Excepto los archivos .txt
+!results/**/*.txt
+!results/*.txt
