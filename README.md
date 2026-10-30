@@ -1,168 +1,137 @@
-# Proyecto GEM5
+# Proyecto gem5: coherencia de caché (MESI vs MOESI) en ARM
 
-Este proyecto permite ejecutar simulaciones de gem5 mediante una imagen Docker que contiene los binarios previamente compilados. De esta manera, no es necesario compilar gem5 ni instalar manualmente sus dependencias en el equipo local.
+Este repositorio incluye una imagen de Docker con gem5 ya compilado, de modo que quien lo use **no necesita compilar gem5** (la compilación completa tarda más de una hora y consume muchos GB de RAM).
 
-## 1. Requisitos
+## Qué contiene la imagen
 
-- Git
-- Docker
+| Elemento | Detalle |
+|---|---|
+| gem5 | v24.0.0.0, binarios `gem5.opt` |
+| Build 1 | ARM + `MESI_Two_Level` |
+| Build 2 | ARM + `MOESI_CMP_directory` |
+| Compilador | `aarch64-linux-gnu-gcc` / `g++` (cross-compiler) |
+| m5ops | headers y `libm5.a` para arm64 |
+| Scripts de gem5 | `configs/` oficiales (incluye `deprecated/example/se.py`) |
 
-## 2. Obtener el proyecto
+Variables de entorno disponibles dentro del contenedor:
 
-El repositorio se clona y se accede al directorio del proyecto mediante los siguientes comandos:
+| Variable | Valor |
+|---|---|
+| `$GEM5_MESI` | binario ARM con MESI_Two_Level |
+| `$GEM5_MOESI` | binario ARM con MOESI_CMP_directory |
+| `$GEM5_CONFIGS` | scripts de configuración de gem5 |
+| `$CC_ARM` | cross-compiler de C para aarch64 |
+| `$M5_INC` / `$M5_LIB` | headers y librería de m5ops |
 
-```bash
-git clone git@github.com:Ahenao16/Proyecto-GEM5.git
-cd Proyecto-GEM5
-```
+## Requisitos
 
-## 3. Descargar la imagen Docker
+- Linux con Docker instalado (`docker --version` debe funcionar).
+- Unos 3 GB libres de disco para la imagen.
+- Conexión a internet solo para el primer `pull`.
+- Git, para clonar este repositorio.
 
-La imagen pública contiene gem5 compilado para ARM y el compilador cruzado para ARM64.
+## Paso a paso
 
-La imagen se descarga mediante:
-
-```bash
-docker pull ghcr.io/ahenao16/proyecto-gem5:latest
-```
-
-No es necesario ejecutar `docker build`, ya que la imagen se encuentra publicada.
-
-Si Docker muestra un error de permisos al acceder a su servicio, los comandos correspondientes pueden ejecutarse con `sudo`.
-
-## 4. Iniciar el contenedor
-
-Desde el directorio del proyecto, el contenedor se inicia mediante el siguiente script:
-
-```bash
-chmod +x scripts/enter-container.sh
-./scripts/enter-container.sh
-```
-
-El script descarga la imagen publicada e inicia el contenedor. Dentro de este, el proyecto está disponible en `/proyecto-gem5` y los binarios de gem5 en `/gem5`.
-
-También es posible iniciar el contenedor manualmente:
+### 1. Clonar el repositorio
 
 ```bash
-docker run --rm -it \
-  -v "$PWD:/proyecto-gem5" \
-  -w /proyecto-gem5 \
-  ghcr.io/ahenao16/proyecto-gem5:latest \
-  bash
+git clone https://github.com/ahenao16/NOMBRE_DEL_REPO.git
+cd NOMBRE_DEL_REPO
 ```
 
-## 5. Preparar el programa de prueba
-
-El código fuente del programa de prueba se encuentra en `src/hola.c`. Para ejecutarlo en gem5, debe compilarse para la arquitectura ARM64.
-
-La compilación se realiza dentro del contenedor mediante:
+### 2. Descargar la imagen
 
 ```bash
-aarch64-linux-gnu-gcc -static \
-  /proyecto-gem5/src/hola.c \
-  -o /proyecto-gem5/src/hola
+docker pull ghcr.io/ahenao16/gem5-coherencia:1.0
 ```
 
-El ejecutable generado puede verificarse con:
+Si el usuario no pertenece al grupo `docker`, debe anteponer `sudo` a todos los comandos de `docker`.
+
+### 3. Entrar al contenedor
+
+Desde la carpeta del proyecto:
 
 ```bash
-file /proyecto-gem5/src/hola
+docker run -it --rm --user $(id -u):$(id -g) \
+    -v $(pwd):/gem5_container ghcr.io/ahenao16/gem5-coherencia:1.0
 ```
 
-La salida debe indicar que se trata de un ejecutable ARM/AArch64.
+El aviso `I have no name!` que aparece al entrar es normal e inofensivo.
 
-## 6. Ejecutar una simulación con MESI
+### 4. Comprobar que la imagen está sana
 
-La simulación con el protocolo de coherencia MESI se ejecuta mediante:
+Dentro del contenedor:
 
 ```bash
-/gem5/build/ARM_MESI/gem5.opt \
-  /gem5/configs/deprecated/example/se.py \
-  --ruby \
-  --cpu-type=O3_ARM_v7a_3 \
-  --cmd=/proyecto-gem5/src/hola
+ldd $GEM5_MESI | grep "not found"
+ls $M5_INC/gem5/m5ops.h $M5_LIB/libm5.a
 ```
 
-Si la simulación termina correctamente, el programa debe mostrar el siguiente mensaje:
+El primer comando **no debe imprimir nada**. El segundo debe mostrar los dos archivos.
 
-```text
-Hola desde gem5!
-```
-
-El argumento `--ruby` habilita el sistema de coherencia Ruby.
-
-## 7. Ejecutar una simulación con MOESI CMP Directory
-
-La simulación con el protocolo MOESI CMP Directory se ejecuta mediante:
+### 5. Compilar un programa para ARM
 
 ```bash
-/gem5/gem5_build/ARM_MOESI_CMP_directory/gem5.opt \
-  /gem5/configs/deprecated/example/se.py \
-  --ruby \
-  --cpu-type=O3_ARM_v7a_3 \
-  --cmd=/proyecto-gem5/src/hola
+$CC_ARM -O2 -static src/hola.c -o hola -I$M5_INC -L$M5_LIB -lm5
+file hola
 ```
 
-Esta ejecución utiliza el binario de gem5 compilado para MOESI CMP Directory.
+`file` debe indicar `ARM aarch64`. Se usa `-static` porque en modo SE el simulador no dispone de librerías dinámicas del guest.
 
-## 8. Modificar los parámetros de simulación
+Para C++ se usa `aarch64-linux-gnu-g++` en lugar de `$CC_ARM`.
 
-Los parámetros de simulación pueden modificarse mediante los argumentos de gem5. Entre ellos se encuentran el número de núcleos, el ancho de emisión (`issueWidth`) y la longitud de los vectores SVE.
+> El binario resultante es para ARM y **solo se ejecuta dentro de gem5**, no directamente en el contenedor.
 
-El siguiente ejemplo configura dos núcleos, un ancho de emisión de 4 y una longitud SVE de 512 bits:
+### 6. Simular con cada protocolo
 
 ```bash
-/gem5/build/ARM_MESI/gem5.opt \
-  /gem5/configs/deprecated/example/se.py \
-  --ruby \
-  --num-cpus=2 \
-  --cpu-type=O3_ARM_v7a_3 \
-  -P 'system.cpu[0].issueWidth = 4' \
-  -P 'system.cpu[1].issueWidth = 4' \
-  -P 'system.cpu[0].isa[0].sve_vl_se = 4' \
-  -P 'system.cpu[1].isa[0].sve_vl_se = 4' \
-  --cmd=/proyecto-gem5/src/hola
+mkdir -p results
+
+$GEM5_MESI -d results/hola_mesi $GEM5_CONFIGS/deprecated/example/se.py \
+    --ruby --num-cpus=2 --cpu-type=TimingSimpleCPU -c hola
+
+$GEM5_MOESI -d results/hola_moesi $GEM5_CONFIGS/deprecated/example/se.py \
+    --ruby --num-cpus=2 --cpu-type=TimingSimpleCPU -c hola
 ```
 
-### Longitud de los vectores SVE
+Cada ejecución debe mostrar la salida del programa y terminar con un mensaje del tipo
+`Exiting @ tick ... because exiting with last active thread context`.
 
-| Longitud SVE | Valor de `sve_vl_se` |
-|---:|---:|
-| 128 bits | 1 |
-| 256 bits | 2 |
-| 512 bits | 4 |
-| 1024 bits | 8 |
+`se.py` muestra un aviso de que está deprecado. Es normal en gem5 v24.0 y no afecta al resultado.
 
-Al modificar el número de núcleos, las asignaciones de `issueWidth` y SVE deben ajustarse para que correspondan a los núcleos configurados.
-
-Estos parámetros permiten modificar la configuración de la simulación. Para evaluar el rendimiento de SVE, se requiere un programa que utilice instrucciones SVE; el programa `hola.c` se utiliza únicamente para verificar el funcionamiento básico.
-
-## 9. Consultar los resultados
-
-Por defecto, gem5 genera los archivos de salida en el directorio `m5out`, relativo al directorio de trabajo desde el que se ejecuta la simulación.
-
-Si la simulación se ejecuta desde `/proyecto-gem5`, los resultados pueden consultarse mediante:
+### 7. Revisar los resultados
 
 ```bash
-ls m5out/
+grep -E "simSeconds|simTicks|simInsts" results/hola_mesi/stats.txt
+grep -E "simSeconds|simTicks|simInsts" results/hola_moesi/stats.txt
 ```
 
-Para consultar algunas estadísticas relevantes:
+Como la carpeta del proyecto está montada, los resultados quedan en `results/` del equipo anfitrión, a nombre del usuario. Si el programa usa `m5_reset_stats` y `m5_dump_stats`, `stats.txt` contendrá un bloque por cada volcado.
+
+Para salir del contenedor: `exit`.
+
+## Estructura del repositorio
+
+```
+.
+├── Dockerfile        # cómo se construyó la imagen
+├── src/              # programas en C (hola.c, gemm_escalar.c, ...)
+├── scripts/          # scripts auxiliares
+├── results/          # resultados (solo se versionan los .txt)
+├── report/           # informe
+└── README.md
+```
+
+## Reconstruir la imagen (solo si hace falta)
+
+> **Atención: este paso NO es necesario para usar el proyecto.**
+> La imagen ya está construida y publicada; con el `docker pull` del paso 2 basta.
+> Solo debe reconstruirse si se quiere **modificar la propia imagen** (otra versión de gem5, otro protocolo, otra ISA o paquetes adicionales).
+
+En ese caso se necesitan unos 40 GB de disco libres y 16 GB de RAM o más:
 
 ```bash
-grep -E "simSeconds|simTicks|simInsts" m5out/stats.txt
+docker build --build-arg JOBS=8 -t gem5-coherencia:1.0 .
 ```
 
-Los archivos `stats.txt` y `config.ini` permiten consultar las estadísticas generadas y verificar la configuración utilizada durante la simulación.
-
-## 10. Finalizar la sesión
-
-La sesión del contenedor se finaliza mediante:
-
-```bash
-exit
-```
-
-El código fuente permanece en el equipo local. La imagen Docker contiene gem5 y el compilador cruzado, por lo que no es necesario reconstruir gem5 para cada simulación.
-
-**Nota:** el script `se.py` está marcado como obsoleto en gem5 y podría eliminarse en futuras versiones. Se mantiene en este proyecto porque corresponde a la configuración utilizada actualmente.
+La compilación tarda entre 2 y 3 horas.
