@@ -134,4 +134,4 @@ En ese caso se necesitan unos 40 GB de disco libres y 16 GB de RAM o más:
 docker build --build-arg JOBS=8 -t gem5-coherencia:1.0 .
 ```
 
-La compilación tarda entre 1 y 2 horas.
+La compilación tarda entre 2 y 3 horas.
