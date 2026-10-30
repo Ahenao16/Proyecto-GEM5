@@ -1,10 +1,13 @@
-m5out/
-dist/
-*.swp
-
-# Ignorar todo dentro de results
-results/*
-
-# Excepto los archivos .txt
+# ---- results: solo .txt (y las carpetas que los contienen) ----
+results/**
+!results/**/
 !results/**/*.txt
-!results/*.txt
+
+# ---- Archivos generados que no se suben ----
+build.log
+kconfig_check.txt
+m5out/
+
+# Binarios ARM compilados en la raíz o en src/
+/hola
+src/*.o
