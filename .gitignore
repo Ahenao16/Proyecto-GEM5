@@ -1,7 +1,8 @@
-# ---- results: solo .txt (y las carpetas que los contienen) ----
+# ---- results: solo .txt, .csv y las carpetas que los contienen ----
 results/**
 !results/**/
 !results/**/*.txt
+!results/**/*.csv
 
 # ---- Archivos generados que no se suben ----
 build.log
@@ -9,5 +10,5 @@ kconfig_check.txt
 m5out/
 
 # Binarios ARM compilados en la raíz o en src/
-/hola
+ /hola
 src/*.o

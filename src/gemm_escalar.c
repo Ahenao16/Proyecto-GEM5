@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <gem5/m5ops.h>
+#include <math.h>
 
 void gemm(const float *A, const float *B, float *C, int N) {
     for (int i = 0; i < N; i++) {

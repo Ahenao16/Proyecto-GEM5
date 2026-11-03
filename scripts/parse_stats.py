@@ -148,9 +148,10 @@ def main():
                     help="en vez de CSV, imprime una tabla alineada con las métricas principales")
     args = ap.parse_args()
 
-    cols = ["run", "protocol", "N", "tag", "simInsts", "simTicks", "time_ms", "cycles", "active_cores",
-            "IPC", "CPI", "L1_hits", "L1_misses", "L1_miss_rate", "L1_miss_lat_mean", "L2_misses",
-            "ruby_msgs_total"]
+    cols = ["run", "protocol", "N", "tag", "width", "ROB",
+        "simInsts", "simTicks", "time_ms", "cycles", "active_cores",
+        "IPC", "CPI", "L1_hits", "L1_misses", "L1_miss_rate",
+        "L1_miss_lat_mean", "L2_misses", "ruby_msgs_total"]
     cols += ["extra:" + e for e in args.extra]
 
     files = find_runs(args.paths)
@@ -175,7 +176,14 @@ def main():
         row["protocol"] = mt.group("p") if mt else ""
         row["N"] = mt.group("n") if mt else ""
         row["tag"] = (mt.group("t") or "") if mt else ""
-        row["time_ms"] = row["simTicks"] / 1e9 if row.get("simTicks") else None   # 1 tick = 1 ps
+
+        # Extraer Width y ROB del nombre de la corrida
+        cfg = re.search(r"w(\d+)_rob(\d+)", row["tag"])
+
+        row["width"] = int(cfg.group(1)) if cfg else ""
+        row["ROB"] = int(cfg.group(2)) if cfg else ""
+
+        row["time_ms"] = row["simTicks"] / 1e9 if row.get("simTicks") else None
         rows.append(row)
 
     if args.table:
