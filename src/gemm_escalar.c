@@ -27,15 +27,24 @@ void init(float *A, float *B, int N) {
 int check(const float *A, const float *B, const float *C, int N) {
     for (int i = 0; i < N; i++) {
         for (int j = 0; j < N; j++) {
-            float esperado = 0.0f;
+
+            double esperado = 0.0;
 
             for (int k = 0; k < N; k++) {
-                esperado += A[i * N + k] * B[k * N + j];
+                esperado += (double)A[i * N + k] *
+                            (double)B[k * N + j];
             }
 
-            if (fabsf(C[i * N + j] - esperado) > 1e-4f) {
+            double diferencia = fabs((double)C[i * N + j] - esperado);
+
+            double tolerancia = 1e-5 *
+                (fabs(esperado) > 1.0 ? fabs(esperado) : 1.0);
+
+            if (diferencia > tolerancia) {
                 printf("Error en C[%d][%d]: obtenido=%f, esperado=%f\n",
                        i, j, C[i * N + j], esperado);
+                printf("Diferencia=%e, tolerancia=%e\n",
+                       diferencia, tolerancia);
                 return 1;
             }
         }
