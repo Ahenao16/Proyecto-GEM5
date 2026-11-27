@@ -11,6 +11,9 @@
 #     CORES="1 2 4 8"     núcleos simulados (= hilos)
 #     PROTOS="mesi"       protocolos Ruby (mesi y/o moesi)
 #     WIDTH=2             ancho del pipeline O3
+#     L2BANKS=1           bancos de L2: 1 (L2 compartida de un banco, por defecto)
+#                         o "cores" (tantos bancos como núcleos, para ver si
+#                         la L2 es el cuello de botella)
 #     JOBS=2              corridas en paralelo
 #     FORCE=1             repetir aunque la corrida ya exista
 #
@@ -18,7 +21,7 @@
 #     SIZES=16 CORES="1 2" ./scripts/run_e4.sh
 #
 # Salida:
-#     results/e4/<protocolo>_n<N>_c<núcleos>/
+#     results/e4/<protocolo>_n<N>_c<núcleos>[_b<bancos L2>]/
 #     results/e4.csv           métricas de cada corrida (ROI)
 #     results/e4_speedup.csv   speedup, eficiencia y fracción serial
 
@@ -36,6 +39,7 @@ SIZES=${SIZES:-"64 128"}
 CORES=${CORES:-"1 2 4 8"}
 PROTOS=${PROTOS:-"mesi"}
 WIDTH=${WIDTH:-2}
+L2BANKS=${L2BANKS:-1}
 JOBS=${JOBS:-2}
 FORCE=${FORCE:-0}
 
@@ -56,6 +60,9 @@ for c in $CORES; do
         echo "Número de núcleos inválido: $c" >&2; exit 1
     fi
 done
+if ! [[ "$L2BANKS" == cores || "$L2BANKS" =~ ^(1|2|4|8|16)$ ]]; then
+    echo "L2BANKS inválido: $L2BANKS (use 1, 2, 4, 8, 16 o cores)" >&2; exit 1
+fi
 for n in $SIZES; do
     if ! [[ "$n" =~ ^[0-9]+$ ]] || (( n < 1 )); then
         echo "N inválido: $n" >&2; exit 1
@@ -75,7 +82,10 @@ STATUS="$OUT/.status"
 
 run_one() {
     local proto=$1 n=$2 c=$3
+    local b=$L2BANKS
+    [[ $b == cores ]] && b=$c
     local d="$OUT/${proto}_n${n}_c${c}"
+    (( b > 1 )) && d="${d}_b${b}"
 
     if [[ $FORCE != 1 && -f "$d/run.log" ]] \
         && grep -q "Exiting @ tick" "$d/run.log" \
@@ -92,6 +102,7 @@ run_one() {
     "$(proto_bin "$proto")" -d "$d" "$SE" \
         --ruby \
         -n "$c" \
+        --num-l2caches="$b" \
         --cpu-type=O3CPU \
         -P "system.cpu[:].fetchWidth=$WIDTH" \
         -P "system.cpu[:].decodeWidth=$WIDTH" \
@@ -136,36 +147,43 @@ import csv, re, sys
 src, dst, l2rx = sys.argv[1], sys.argv[2], sys.argv[3]
 rows = list(csv.DictReader(open(src, newline="")))
 
-def cores(r):
-    m = re.fullmatch(r"c(\d+)", r["tag"])
-    return int(m.group(1)) if m else None
+def cfg(r):
+    m = re.fullmatch(r"c(\d+)(?:_b(\d+))?", r["tag"])
+    return (int(m.group(1)), int(m.group(2) or 1)) if m else (None, None)
 
 out = []
 for proto in sorted({r["protocol"] for r in rows}):
     for n in sorted({r["N"] for r in rows if r["protocol"] == proto}, key=int):
-        grp = {cores(r): r for r in rows
-               if r["protocol"] == proto and r["N"] == n and cores(r)}
-        if 1 not in grp:
+        grp = [r for r in rows if r["protocol"] == proto and r["N"] == n and cfg(r)[0]]
+        base = next((r for r in grp if cfg(r) == (1, 1)), None)
+        if base is None:
             print(f"AVISO: falta la corrida de 1 núcleo para {proto} N={n}")
             continue
-        t1 = float(grp[1]["simTicks"])
-        for c in sorted(grp):
-            r = grp[c]
-            tn = float(r["simTicks"])
-            s = t1 / tn
-            f = (c / s - 1) / (c - 1) if c > 1 else ""
-            out.append({
-                "protocol": proto, "N": int(n), "cores": c,
-                "time_ms": tn / 1e9,
-                "speedup": round(s, 4),
-                "efficiency": round(s / c, 4),
-                "serial_fraction": round(f, 4) if f != "" else "",
-                "L2_misses": r.get("extra:" + l2rx, ""),
-                "L1_misses": r["L1_misses"],
-                "L1_miss_lat_mean": r["L1_miss_lat_mean"],
-            })
+        t1 = float(base["simTicks"])
+        # Serie "compartida": L2 de 1 banco. Serie "bancos": bancos = núcleos.
+        series = {"compartida": [r for r in grp if cfg(r)[1] == 1]}
+        banked = [r for r in grp if cfg(r)[1] > 1]
+        if banked:
+            series["bancos"] = [base] + banked
+        for modo, lista in series.items():
+            for r in sorted(lista, key=lambda r: cfg(r)[0]):
+                c, b = cfg(r)
+                tn = float(r["simTicks"])
+                s = t1 / tn
+                f = (c / s - 1) / (c - 1) if c > 1 else ""
+                out.append({
+                    "protocol": proto, "N": int(n), "l2_mode": modo,
+                    "cores": c, "l2_banks": b,
+                    "time_ms": tn / 1e9,
+                    "speedup": round(s, 4),
+                    "efficiency": round(s / c, 4),
+                    "serial_fraction": round(f, 4) if f != "" else "",
+                    "L2_misses": r.get("extra:" + l2rx, ""),
+                    "L1_misses": r["L1_misses"],
+                    "L1_miss_lat_mean": r["L1_miss_lat_mean"],
+                })
 
-fields = ["protocol", "N", "cores", "time_ms", "speedup", "efficiency",
+fields = ["protocol", "N", "l2_mode", "cores", "l2_banks", "time_ms", "speedup", "efficiency",
           "serial_fraction", "L2_misses", "L1_misses", "L1_miss_lat_mean"]
 with open(dst, "w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=fields)
@@ -175,7 +193,7 @@ with open(dst, "w", newline="") as f:
 print("\nSpeedup, eficiencia y fracción serial (Amdahl / Karp-Flatt):")
 for r in out:
     fs = f"{r['serial_fraction']:.3f}" if r["serial_fraction"] != "" else "  -  "
-    print(f"{r['protocol']:>5} N={r['N']:>3} núcleos={r['cores']} | "
+    print(f"{r['protocol']:>5} N={r['N']:>3} L2={r['l2_mode']:<10} núcleos={r['cores']} bancos={r['l2_banks']} | "
           f"S={r['speedup']:.3f} | E={r['efficiency']:.3f} | f={fs} | "
           f"fallos L2={r['L2_misses']}")
 PY
