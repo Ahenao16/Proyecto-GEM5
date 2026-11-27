@@ -5,8 +5,12 @@ import sys
 
 BLOCK_SEP = "---------- Begin Simulation Statistics"
 NAME_RE = re.compile(r"^(?P<proto>[a-z0-9]+)_(?P<work>.+)_n(?P<cores>\d+)$")
-COLUMNS = ["protocolo", "carga", "nucleos", "sim_ticks", "inv_events", "inv_msgs",
+COLUMNS = ["protocolo", "carga", "nucleos", "sim_ticks", "inv_events",
            "fwd_events", "msgs", "msg_bytes", "miss_lat_mean", "miss_samples"]
+# Eventos del L1 agregados y desglosados por estado: ...L1Cache_Controller[.<Estado>].<Evento>::total
+EVENT_RE = re.compile(
+    r"^system\.ruby\.L1Cache_Controller\.(?:(\w+)\.)?(Fwd_GETS|Fwd_GETX|Inv)::total$")
+NET_RE = re.compile(r"^system\.ruby\.network\.(msg_count|msg_byte)[.:]+(\w+)$")
 
 
 def first_block(path):
@@ -69,39 +73,42 @@ def extract(stats):
     inv_ev = fwd_ev = 0.0
     inv_found = fwd_found = False
     msgs = msg_b = 0.0
-    inv_msgs = 0.0
     net_found = False
-    net_pat = re.compile(r"^system\.ruby\.network\.(msg_count|msg_byte)[.:]+(\w+)$")
     for name, val in stats.items():
-        p = name.split(".")
-        # Evento agregado (sin estado) del controlador L1: ...L1Cache_Controller.<Evento>
-        if len(p) >= 2 and p[-2] == "L1Cache_Controller":
-            if p[-1] == "Inv":
+        # Total agregado (sin estado) del evento: ...L1Cache_Controller.<Evento>::total
+        m = EVENT_RE.match(name)
+        if m and m.group(1) is None:
+            if m.group(2) == "Inv":
                 inv_ev += val
                 inv_found = True
-            elif p[-1] in ("Fwd_GETX", "Fwd_GETS"):
+            else:
                 fwd_ev += val
                 fwd_found = True
-        m = net_pat.match(name)
+        m = NET_RE.match(name)
         if m:
             net_found = True
             if m.group(1) == "msg_count":
                 msgs += val
-                if "inv" in m.group(2).lower():
-                    inv_msgs += val
             else:
                 msg_b += val
     lat, samples = miss_latency(stats)
     return {
         "sim_ticks": first(stats, "simTicks", "sim_ticks"),
         "inv_events": inv_ev if inv_found else None,
-        "inv_msgs": inv_msgs if net_found else None,
         "fwd_events": fwd_ev if fwd_found else None,
         "msgs": msgs if net_found else None,
         "msg_bytes": msg_b if net_found else None,
         "miss_lat_mean": lat,
         "miss_samples": samples or None,
     }
+
+
+def corridas(root):
+    """Itera (nombre, stats) de cada corrida válida, en orden."""
+    for d in sorted(os.listdir(root)):
+        path = os.path.join(root, d, "stats.txt")
+        if NAME_RE.match(d) and os.path.isfile(path):
+            yield d, first_block(path)[0]
 
 
 def collect(root):
@@ -129,11 +136,11 @@ def fmt(v):
 
 
 def table(rows):
-    print(f"{'proto':6} {'carga':9} {'n':>2} {'ticks':>14} {'inv_ev':>9} {'inv_msg':>9} "
+    print(f"{'proto':6} {'carga':9} {'n':>2} {'ticks':>14} {'inv_ev':>9} "
           f"{'fwd_ev':>9} {'msgs':>10} {'lat_fallo':>9}")
     for r in rows:
         print(f"{r['protocolo']:6} {r['carga']:9} {r['nucleos']:>2} {fmt(r['sim_ticks']):>14} "
-              f"{fmt(r['inv_events']):>9} {fmt(r['inv_msgs']):>9} {fmt(r['fwd_events']):>9} "
+              f"{fmt(r['inv_events']):>9} {fmt(r['fwd_events']):>9} "
               f"{fmt(r['msgs']):>10} {fmt(r['miss_lat_mean']):>9}")
     # Costo del falso compartido: nopad / pad
     idx = {(r["protocolo"], r["carga"], r["nucleos"]): r for r in rows}
@@ -152,15 +159,12 @@ def table(rows):
 
 def find(root, patron):
     pat = re.compile(patron, re.I)
-    for d in sorted(os.listdir(root)):
-        path = os.path.join(root, d, "stats.txt")
-        if os.path.isfile(path):
-            stats, _ = first_block(path)
-            print(f"# {d}")
-            for k, v in stats.items():
-                if pat.search(k):
-                    print(f"{k} {v:g}")
-            return
+    for d, stats in corridas(root):
+        print(f"# {d}")
+        for k, v in stats.items():
+            if pat.search(k):
+                print(f"{k} {v:g}")
+        return
     print("No hay stats.txt en", root, file=sys.stderr)
 
 

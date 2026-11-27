@@ -19,6 +19,8 @@ FORCE=${FORCE:-0}
 OUT=results/e5
 SE="$GEM5_CONFIGS/deprecated/example/se.py"
 
+PARAMS="cpu=$CPU iters=$ITERS gemm_n=$GEMM_N"
+
 cpu_type() {
     case "$1" in
         timing) echo TimingSimpleCPU ;;
@@ -74,9 +76,11 @@ STATUS="$OUT/.status"
 run_one() {
     local proto=$1 w=$2 n=$3
     local d="$OUT/${proto}_${w}_n${n}"
+    # Reutilizar solo si terminó bien Y se hizo con los mismos parámetros
     if [[ $FORCE != 1 && -f "$d/run.log" ]] \
         && grep -q "Exiting @ tick" "$d/run.log" \
-        && grep -q "Resultado correcto" "$d/run.log"; then
+        && grep -q "Resultado correcto" "$d/run.log" \
+        && [[ "$(cat "$d/params.txt" 2>/dev/null)" == "$PARAMS" ]]; then
         echo "[ya existe] $d"
         echo "ok $d" >> "$STATUS"
         return 0
@@ -90,6 +94,7 @@ run_one() {
     "$(proto_bin "$proto")" -d "$d" "$SE" --ruby -n "$n" --cpu-type="$(cpu_type "$CPU")" \
         -c "$bin" -o "$args" > "$d/run.log" 2>&1
     if grep -q "Resultado correcto" "$d/run.log" && grep -q "Exiting @ tick" "$d/run.log"; then
+        echo "$PARAMS" > "$d/params.txt"
         echo "[ok]        $d"
         echo "ok $d" >> "$STATUS"
     else
